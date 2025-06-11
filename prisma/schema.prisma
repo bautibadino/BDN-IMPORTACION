@@ -1,0 +1,193 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL") // Requerido para algunas operaciones como db push
+}
+
+// --- ENUMS ---
+// Usar Enums mejora la integridad de los datos.
+
+enum ShipmentType {
+  aéreo
+  marítimo
+  terrestre
+}
+
+enum Incoterm {
+  EXW
+  FOB
+  CIF
+  DDP
+}
+
+enum OrderStatus {
+  borrador
+  pendiente_pago
+  pagado
+  en_producción
+  listo_embarque
+  embarcado
+  en_tránsito
+  en_aduana
+  recibido
+  cancelado
+}
+
+enum LeadStatus {
+  visto
+  contacto
+  muestra
+  pedido
+  descartado
+}
+
+enum DocumentType {
+  proforma_invoice
+  commercial_invoice
+  packing_list
+  bill_of_lading
+  certificate_of_origin
+  insurance_policy
+  other
+}
+
+enum ImportCostType {
+  flete_internacional
+  flete_local
+  aduana_impuestos
+  seguro
+  almacenaje
+  despachante
+  bancarios
+  otros
+}
+
+// --- MODELS ---
+
+model Supplier {
+  id            String         @id @default(cuid())
+  name          String
+  country       String?
+  contactName   String?
+  whatsapp      String?
+  email         String?        @unique
+  source        String?
+  language      String?
+  rating        Int?
+  isVerified    Boolean?       @default(false)
+  firstContact  DateTime?
+  tags          String?
+  notes         SupplierNote[]
+  productLeads  ProductLead[]
+}
+
+model SupplierNote {
+  id         String   @id @default(cuid())
+  date       DateTime @default(now())
+  note       String
+  addedBy    String?
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+}
+
+model ProductLead {
+  id                String             @id @default(cuid())
+  name              String
+  category          String
+  referencePriceUsd Float?
+  moq               Int?
+  currency          String?
+  volumeM3          Float?
+  weightKg          Float?
+  photoUrl          String?
+  sourceUrl         String?
+  tags              String?
+  createdAt         DateTime           @default(now())
+  supplierId        String
+  supplier          Supplier           @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  statuses          ProductLeadStatus[]
+  orderItems        OrderItem[]
+  product           Product? // Relación uno a uno con Product
+}
+
+model ProductLeadStatus {
+  id            String     @id @default(cuid())
+  date          DateTime   @default(now())
+  status        LeadStatus
+  note          String?
+  addedBy       String?
+  productLeadId String
+  productLead   ProductLead @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id                String       @id @default(cuid())
+  orderNumber       String       @unique
+  shipmentType      ShipmentType
+  incoterm          Incoterm
+  status            OrderStatus
+  forwarder         String?
+  orderDate         DateTime
+  trackingCode      String?
+  estimatedArrival  DateTime?
+  portOfOrigin      String?
+  portOfDestination String?
+  items             OrderItem[]
+  costs             ImportCost[]
+  documents         Document[]
+}
+
+model OrderItem {
+  id              String      @id @default(cuid())
+  quantity        Int
+  unitPriceUsd    Float
+  discountPercent Float?      @default(0)
+  orderId         String
+  order           Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productLeadId   String
+  productLead     ProductLead @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, productLeadId]) // Evita añadir el mismo producto dos veces al mismo pedido
+}
+
+model ImportCost {
+  id          String         @id @default(cuid())
+  type        ImportCostType
+  amountUsd   Float
+  description String?
+  appliesTo   String? // "todos" | "manual"
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id         String       @id @default(cuid())
+  type       DocumentType
+  fileUrl    String
+  note       String?
+  uploadedAt DateTime     @default(now())
+  orderId    String
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id               String    @id @default(cuid())
+  name             String
+  internalCode     String?
+  finalUnitCostUsd Float
+  finalUnitCostArs Float
+  markupPercentage Float
+  finalPriceArs    Float
+  stock            Int
+  location         String?
+  mlListingUrl     String?
+  productLeadId    String    @unique // Clave para la relación 1 a 1
+  productLead      ProductLead @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+}
