@@ -6,9 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL") // Requerido para algunas operaciones como db push
+  provider = "sqlite" // Cambia a "postgresql" si usas PostgreSQL
+  url      = env("DATABASE_URL")
 }
 
 // --- ENUMS ---

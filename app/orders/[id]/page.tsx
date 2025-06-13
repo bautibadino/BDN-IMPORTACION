@@ -11,6 +11,8 @@ import { CalendarDays, Truck, Anchor, DollarSign, PlusCircle, PackagePlus } from
 import { OrderItemsSection } from "../components/order-items-section"
 import { OrderStatusUpdater } from "./components/order-status-updater" // Importado
 import { AddToStockForm } from "./components/add-to-stock-form" // Importado
+import ImportCostForm from "@/components/orders/ImportCostForm"
+import CostBreakdown from "@/components/orders/CostBreakdown"
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog" // DialogTrigger
 import type { Order, OrderItem, ProductLead } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -25,6 +27,7 @@ export default function OrderDetailPageClient({ params }: { params: { id: string
   const [initialOrderItems, setInitialOrderItems] = useState<OrderItem[]>([])
   const [allProductLeads, setAllProductLeads] = useState<ProductLead[]>([])
   const [isAddToStockDialogOpen, setIsAddToStockDialogOpen] = useState(false)
+  const [isImportCostDialogOpen, setIsImportCostDialogOpen] = useState(false)
   const [dataVersion, setDataVersion] = useState(0) // Para forzar recarga
 
   useEffect(() => {
@@ -63,9 +66,9 @@ export default function OrderDetailPageClient({ params }: { params: { id: string
       case "recibido":
         return "default"
       case "pendiente_pago":
-      case "en_produccion":
+      case "en_producción":
       case "listo_embarque":
-      case "en_transito":
+      case "en_tránsito":
       case "en_aduana":
         return "secondary"
       case "cancelado":
@@ -135,12 +138,30 @@ export default function OrderDetailPageClient({ params }: { params: { id: string
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Costos de Importación</CardTitle>
-              <Button variant="outline" size="sm" disabled>
-                <PlusCircle className="mr-2 h-4 w-4" /> Añadir Costo
-              </Button>
+              <Dialog open={isImportCostDialogOpen} onOpenChange={setIsImportCostDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir Costo
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <ImportCostForm
+                    orderId={order.id}
+                    onSuccess={() => {
+                      setIsImportCostDialogOpen(false)
+                      refreshOrderData()
+                    }}
+                    onCancel={() => setIsImportCostDialogOpen(false)}
+                  />
+                </DialogContent>
+              </Dialog>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground text-sm">Próximamente...</p>
+              <CostBreakdown 
+                orderId={order.id} 
+                order={order} 
+                onOrderUpdated={refreshOrderData}
+              />
             </CardContent>
           </Card>
         </div>
@@ -180,13 +201,13 @@ export default function OrderDetailPageClient({ params }: { params: { id: string
                 </p>
               )}
               <hr className="my-3" />
-              <p className="text-sm font-medium">Cálculo de Costos Finales</p>
+              <p className="text-sm font-medium">Finalizar Orden</p>
               <p className="text-xs text-muted-foreground pb-1">
-                Calcula el costo final de los productos una vez añadidos los items y costos de importación.
+                {order.status === "recibido" 
+                  ? "Los costos finales se muestran en la sección de Costos de Importación."
+                  : "Cambia el estado a 'Recibido' para ver los costos finales y crear productos."
+                }
               </p>
-              <Button className="w-full" disabled>
-                <DollarSign className="mr-2 h-4 w-4" /> Calcular Costos
-              </Button>
             </CardContent>
           </Card>
 

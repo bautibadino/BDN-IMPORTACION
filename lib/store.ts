@@ -83,6 +83,11 @@ export const updateOrder = async (id: string, data: Partial<OrderFormData>) =>
 
 // --- OrderItem, Cost, Document Functions ---
 export const getOrderItemsByOrderId = async (orderId: string) => await prisma.orderItem.findMany({ where: { orderId } })
+export const getOrderItemsWithProductsByOrderId = async (orderId: string) => 
+  await prisma.orderItem.findMany({ 
+    where: { orderId },
+    include: { productLead: true }
+  })
 export const addOrderItem = async (data: OrderItemFormData) => await prisma.orderItem.create({ data })
 export const getImportCostsByOrderId = async (orderId: string) =>
   await prisma.importCost.findMany({ where: { orderId } })

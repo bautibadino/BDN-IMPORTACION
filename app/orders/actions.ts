@@ -11,10 +11,16 @@ import {
   getProductLeadsWithDetails,
   getOrderById,
   getOrderItemsByOrderId,
+  getOrderItemsWithProductsByOrderId,
+  getImportCostsByOrderId,
   getProductLeads,
+  addProduct,
+  getProductByProductLeadId,
+  updateProduct,
 } from "@/lib/store"
-import type { OrderFormData, OrderItemFormData, ImportCostFormData, DocumentFormData } from "@/lib/types"
+import type { OrderFormData, OrderItemFormData, ImportCostFormData, DocumentFormData, Product } from "@/lib/types"
 import type { Order } from "@prisma/client" // Importar desde prisma client
+import { calculateOrderCosts, type OrderItemWithProduct } from "@/lib/costs"
 
 // Definimos un tipo para los items que vendrán del formulario
 interface OrderItemInput extends Omit<OrderItemFormData, "orderId"> {}
@@ -150,5 +156,106 @@ export async function addDocumentAction(formData: DocumentFormData) {
     return { success: true, message: "Documento añadido.", document: newDocument }
   } catch (error) {
     return { success: false, message: "Error al añadir documento." }
+  }
+}
+
+// --- Costs Calculation Actions ---
+export async function getOrderCostBreakdownAction(orderId: string) {
+  try {
+    const orderItems = await getOrderItemsWithProductsByOrderId(orderId) as OrderItemWithProduct[]
+    const importCosts = await getImportCostsByOrderId(orderId)
+    
+    const costCalculation = calculateOrderCosts(orderItems, importCosts)
+    return { success: true, data: costCalculation }
+  } catch (error) {
+    console.error("Error calculating order costs:", error)
+    return { success: false, message: "Error al calcular los costos de la orden." }
+  }
+}
+
+// --- Order Finalization Actions ---
+export async function finalizeOrderAction(orderId: string) {
+  try {
+    // Obtener la orden
+    const order = await getOrderById(orderId)
+    if (!order) {
+      return { success: false, message: "Orden no encontrada." }
+    }
+
+    // Solo procesar si el estado es "recibido"
+    if (order.status !== "recibido") {
+      return { success: false, message: "La orden debe estar en estado 'recibido' para finalizar." }
+    }
+
+    // Obtener items y costos
+    const orderItems = await getOrderItemsWithProductsByOrderId(orderId) as OrderItemWithProduct[]
+    const importCosts = await getImportCostsByOrderId(orderId)
+    
+    if (orderItems.length === 0) {
+      return { success: false, message: "La orden no tiene items para procesar." }
+    }
+
+    // Calcular costos
+    const costCalculation = calculateOrderCosts(orderItems, importCosts)
+    
+    // Constante para conversión USD a ARS (esto debería venir de configuración)
+    const USD_TO_ARS_RATE = 1000
+
+    // Crear o actualizar productos
+    const processedProducts = []
+    for (const item of costCalculation.items) {
+      const productLead = orderItems.find(oi => oi.productLeadId === item.productLeadId)
+      if (!productLead) continue
+
+      // Buscar si ya existe un producto para este ProductLead
+      const existingProduct = await getProductByProductLeadId(item.productLeadId)
+      
+      const finalUnitCostArs = item.finalUnitCostUsd * USD_TO_ARS_RATE
+      const markupPercentage = 30 // Margen por defecto
+      const finalPriceArs = finalUnitCostArs * (1 + markupPercentage / 100)
+
+      if (existingProduct) {
+        // Actualizar producto existente - sumar al stock
+        const newStock = existingProduct.stock + item.quantity
+        const updatedProduct = await updateProduct(existingProduct.id, {
+          finalUnitCostUsd: item.finalUnitCostUsd,
+          finalUnitCostArs,
+          markupPercentage,
+          finalPriceArs,
+          stock: newStock
+        })
+        processedProducts.push({ ...updatedProduct, operation: "updated" })
+      } else {
+        // Crear nuevo producto
+        const newProduct: Omit<Product, "id"> = {
+          productLeadId: item.productLeadId,
+          name: item.productName,
+          internalCode: null,
+          finalUnitCostUsd: item.finalUnitCostUsd,
+          finalUnitCostArs,
+          markupPercentage,
+          finalPriceArs,
+          stock: item.quantity,
+          location: null,
+          mlListingUrl: null
+        }
+        const createdProduct = await addProduct(newProduct)
+        processedProducts.push({ ...createdProduct, operation: "created" })
+      }
+    }
+
+    revalidatePath("/orders")
+    revalidatePath(`/orders/${orderId}`)
+    revalidatePath("/products")
+
+    return { 
+      success: true, 
+      message: `Orden finalizada. ${processedProducts.length} productos procesados.`,
+      processedProducts,
+      costCalculation
+    }
+  } catch (error) {
+    console.error("Error finalizing order:", error)
+    return { success: false, message: "Error al finalizar la orden." }
   }
 }
