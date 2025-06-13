@@ -9,13 +9,34 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog"
-import type { Order, ProductLeadWithDetails } from "@/lib/types"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import type { Order } from "@/lib/types"
 import { saveOrderAction } from "../actions"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-import { PlusCircle, Trash2 } from "lucide-react"
+import { 
+  PlusCircle, 
+  Trash2, 
+  Package, 
+  FileText, 
+  Calendar, 
+  Truck, 
+  Anchor, 
+  Navigation, 
+  MapPin, 
+  Clock, 
+  Search,
+  Settings,
+  DollarSign,
+  Hash,
+  Save,
+  Loader2,
+  Sparkles
+} from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useState, useMemo } from "react"
+import type { ProductLeadWithDetails as ProductLeadWithDetailsFromStore } from "@/lib/store"
 
 // Schema para los datos principales del pedido
 const orderBaseFormSchema = z.object({
@@ -27,10 +48,10 @@ const orderBaseFormSchema = z.object({
     "borrador",
     "pendiente_pago",
     "pagado",
-    "en_produccion",
+    "en_producción",
     "listo_embarque",
     "embarcado",
-    "en_transito",
+    "en_tránsito",
     "en_aduana",
     "recibido",
     "cancelado",
@@ -62,7 +83,7 @@ type FullOrderFormValues = z.infer<typeof fullOrderFormSchema>
 
 interface OrderFormProps {
   order?: Order | null
-  allProductLeads: ProductLeadWithDetails[]
+  allProductLeads: ProductLeadWithDetailsFromStore[]
   onClose: () => void
 }
 
@@ -71,6 +92,7 @@ export function OrderForm({ order, allProductLeads, onClose }: OrderFormProps) {
   const router = useRouter()
   const isEditMode = !!order
   const [searchTerm, setSearchTerm] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const form = useForm<FullOrderFormValues>({
     resolver: zodResolver(fullOrderFormSchema),
@@ -91,9 +113,6 @@ export function OrderForm({ order, allProductLeads, onClose }: OrderFormProps) {
     },
   })
 
-  // Log para ver errores de validación del formulario en cada render
-  console.log("OrderForm - formState.errors:", form.formState.errors)
-
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     name: "items",
@@ -109,7 +128,7 @@ export function OrderForm({ order, allProductLeads, onClose }: OrderFormProps) {
     )
   }, [allProductLeads, searchTerm])
 
-  const handleSelectProductLead = (lead: ProductLeadWithDetails) => {
+  const handleSelectProductLead = (lead: ProductLeadWithDetailsFromStore) => {
     if (fields.some((item) => item.productLeadId === lead.id)) {
       toast({ title: "Producto ya añadido", description: `${lead.name} ya está en la lista.`, variant: "default" })
       return
@@ -128,375 +147,643 @@ export function OrderForm({ order, allProductLeads, onClose }: OrderFormProps) {
   }
 
   async function onSubmit(data: FullOrderFormValues) {
-    console.log("OrderForm: onSubmit triggered.") // LOG 1: ¿Se llama a onSubmit?
-    console.log("OrderForm: Form data:", data) // LOG 2: ¿Qué datos se envían?
-
-    const orderData = orderBaseFormSchema.parse(data)
-    const itemsData = data.items.map((item) => ({
-      productLeadId: item.productLeadId,
-      quantity: item.quantity,
-      unitPriceUsd: item.unitPriceUsd,
-      discountPercent: item.discountPercent,
-    }))
-
-    console.log("OrderForm: Parsed orderData:", orderData) // LOG 3
-    console.log("OrderForm: Parsed itemsData:", itemsData) // LOG 4
-
+    setIsSubmitting(true)
+    
     try {
+      const orderData = orderBaseFormSchema.parse(data)
+      const itemsData = data.items.map((item) => ({
+        productLeadId: item.productLeadId,
+        quantity: item.quantity,
+        unitPriceUsd: item.unitPriceUsd,
+        discountPercent: item.discountPercent,
+      }))
+
       const result = await saveOrderAction(order?.id || null, orderData, itemsData)
-      console.log("OrderForm: saveOrderAction result:", result) // LOG 5: ¿Qué devuelve la action?
 
       if (result.success && result.order) {
-        toast({ title: "Éxito", description: result.message })
+        toast({ 
+          title: "¡Éxito!", 
+          description: result.message,
+          className: "bg-green-50 border-green-200 text-green-800"
+        })
         onClose()
         router.push(`/orders/${result.order.id}`)
       } else {
-        toast({ title: "Error", description: result.message || "No se pudo crear el pedido.", variant: "destructive" })
+        toast({ 
+          title: "Error", 
+          description: result.message || "No se pudo crear el pedido.", 
+          variant: "destructive" 
+        })
       }
     } catch (error) {
-      console.error("OrderForm: Error calling saveOrderAction:", error) // LOG 6: ¿Hay error al llamar la action?
+      console.error("OrderForm: Error calling saveOrderAction:", error)
       toast({
         title: "Error Crítico",
         description: "Ocurrió un error inesperado al procesar el pedido.",
         variant: "destructive",
       })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{isEditMode ? "Editar Pedido" : "Nuevo Pedido de Importación"}</DialogTitle>
-      </DialogHeader>
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 py-4">
-          <ScrollArea className="h-[calc(80vh-200px)] pr-4">
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium text-foreground mb-2">Datos del Pedido</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="orderNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nº Pedido*</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="orderDate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Fecha Pedido*</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="shipmentType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tipo Envío*</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="marítimo">Marítimo</SelectItem>
-                          <SelectItem value="aéreo">Aéreo</SelectItem>
-                          <SelectItem value="terrestre">Terrestre</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="incoterm"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Incoterm*</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="EXW">EXW</SelectItem>
-                          <SelectItem value="FOB">FOB</SelectItem>
-                          <SelectItem value="CIF">CIF</SelectItem>
-                          <SelectItem value="DDP">DDP</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="status"
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Estado*</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {(
-                            [
-                              "borrador",
-                              "pendiente_pago",
-                              "pagado",
-                              "en_produccion",
-                              "listo_embarque",
-                              "embarcado",
-                              "en_transito",
-                              "en_aduana",
-                              "recibido",
-                              "cancelado",
-                            ] as Order["status"][]
-                          ).map((s) => (
-                            <SelectItem key={s} value={s} className="capitalize">
-                              {s.replace(/_/g, " ")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="forwarder"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Forwarder</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="trackingCode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tracking</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="estimatedArrival"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Llegada Estimada</FormLabel>
-                      <FormControl>
-                        <Input type="date" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="portOfOrigin"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Puerto Origen</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="portOfDestination"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Puerto Destino</FormLabel>
-                      <FormControl>
-                        <Input {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+  const totalItems = fields.length
+  const totalQuantity = fields.reduce((sum, item) => sum + (item.quantity || 0), 0)
+  const totalValue = fields.reduce((sum, item) => {
+    const itemTotal = (item.quantity || 0) * (item.unitPriceUsd || 0)
+    const discount = (item.discountPercent || 0) / 100
+    return sum + itemTotal * (1 - discount)
+  }, 0)
 
-              <h3 className="text-lg font-medium text-foreground pt-4 mb-2">Seleccionar Productos</h3>
-              <Input
-                placeholder="Buscar producto por nombre, proveedor, tags..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="mb-4"
-              />
-              <ScrollArea className="h-[200px] border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[50px]"></TableHead>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Proveedor</TableHead>
-                      <TableHead>Precio Ref.</TableHead>
-                      <TableHead>Estado Lead</TableHead>
-                      <TableHead>MOQ</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredProductLeads.map((lead) => (
-                      <TableRow key={lead.id}>
-                        <TableCell>
+  return (
+    <div className="min-h-[80vh] bg-gradient-to-br from-blue-50/50 via-white to-indigo-50/30">
+      <DialogHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100 p-6 rounded-t-lg">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg">
+            <Package className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-900 to-indigo-900 bg-clip-text text-transparent">
+              {isEditMode ? "Editar Pedido" : "Nuevo Pedido de Importación"}
+            </DialogTitle>
+            <p className="text-muted-foreground mt-1">
+              {isEditMode ? "Modifica los datos del pedido existente" : "Crea un nuevo pedido con productos seleccionados"}
+            </p>
+          </div>
+        </div>
+        
+        {/* Estadísticas del formulario */}
+        {fields.length > 0 && (
+          <div className="flex gap-4 mt-4">
+            <Badge variant="outline" className="bg-white/70 border-blue-200 text-blue-700">
+              <Package className="h-3 w-3 mr-1" />
+              {totalItems} productos
+            </Badge>
+            <Badge variant="outline" className="bg-white/70 border-green-200 text-green-700">
+              <Hash className="h-3 w-3 mr-1" />
+              {totalQuantity} unidades
+            </Badge>
+            <Badge variant="outline" className="bg-white/70 border-indigo-200 text-indigo-700">
+              <DollarSign className="h-3 w-3 mr-1" />
+              ${totalValue.toFixed(2)}
+            </Badge>
+          </div>
+        )}
+      </DialogHeader>
+      
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="p-6">
+          <ScrollArea className="h-[calc(80vh-250px)] pr-4">
+            <div className="space-y-8">
+              
+              {/* Información Básica */}
+              <Card className="border-0 shadow-sm bg-white/80 backdrop-blur-sm">
+                <CardHeader className="bg-gradient-to-r from-gray-50 to-slate-50 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-gray-500 to-slate-600 rounded-lg shadow-sm">
+                      <FileText className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg bg-gradient-to-r from-gray-900 to-slate-900 bg-clip-text text-transparent">
+                        Información Básica
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">Datos principales del pedido</p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="orderNumber"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Hash className="h-4 w-4 text-blue-500" />
+                            Nº Pedido *
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="PO-2024-001"
+                              className="bg-white/70 border-gray-200 focus:border-blue-500 focus:ring-blue-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="orderDate"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-green-500" />
+                            Fecha Pedido *
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="date" 
+                              {...field} 
+                              className="bg-white/70 border-gray-200 focus:border-green-500 focus:ring-green-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Información de Envío */}
+              <Card className="border-0 shadow-sm bg-white/80 backdrop-blur-sm">
+                <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg shadow-sm">
+                      <Truck className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg bg-gradient-to-r from-blue-900 to-indigo-900 bg-clip-text text-transparent">
+                        Información de Envío
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">Datos logísticos y de transporte</p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="shipmentType"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Truck className="h-4 w-4 text-blue-500" />
+                            Tipo de Envío *
+                          </FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="bg-white/70 border-gray-200 focus:border-blue-500">
+                                <SelectValue placeholder="Selecciona tipo de envío" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="marítimo">🚢 Marítimo</SelectItem>
+                              <SelectItem value="aéreo">✈️ Aéreo</SelectItem>
+                              <SelectItem value="terrestre">🚛 Terrestre</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="incoterm"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Anchor className="h-4 w-4 text-indigo-500" />
+                            Incoterm *
+                          </FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="bg-white/70 border-gray-200 focus:border-indigo-500">
+                                <SelectValue placeholder="Selecciona incoterm" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="EXW">EXW - Ex Works</SelectItem>
+                              <SelectItem value="FOB">FOB - Free on Board</SelectItem>
+                              <SelectItem value="CIF">CIF - Cost Insurance Freight</SelectItem>
+                              <SelectItem value="DDP">DDP - Delivered Duty Paid</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="status"
+                      render={({ field }) => (
+                        <FormItem className="md:col-span-2">
+                          <FormLabel className="flex items-center gap-2">
+                            <Settings className="h-4 w-4 text-purple-500" />
+                            Estado *
+                          </FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="bg-white/70 border-gray-200 focus:border-purple-500">
+                                <SelectValue placeholder="Estado del pedido" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {(
+                                [
+                                  "borrador",
+                                  "pendiente_pago",
+                                  "pagado",
+                                  "en_producción",
+                                  "listo_embarque",
+                                  "embarcado",
+                                  "en_tránsito",
+                                  "en_aduana",
+                                  "recibido",
+                                  "cancelado",
+                                ] as Order["status"][]
+                              ).map((s) => (
+                                <SelectItem key={s} value={s} className="capitalize">
+                                  {s.replace(/_/g, " ")}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Datos Adicionales */}
+              <Card className="border-0 shadow-sm bg-white/80 backdrop-blur-sm">
+                <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg shadow-sm">
+                      <Navigation className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg bg-gradient-to-r from-green-900 to-emerald-900 bg-clip-text text-transparent">
+                        Datos Adicionales
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">Información complementaria (opcional)</p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="forwarder"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Navigation className="h-4 w-4 text-green-500" />
+                            Forwarder
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="Nombre del forwarder"
+                              className="bg-white/70 border-gray-200 focus:border-green-500 focus:ring-green-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="trackingCode"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Package className="h-4 w-4 text-orange-500" />
+                            Código Tracking
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="Código de seguimiento"
+                              className="bg-white/70 border-gray-200 focus:border-orange-500 focus:ring-orange-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="estimatedArrival"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-yellow-500" />
+                            Llegada Estimada
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              type="date" 
+                              {...field} 
+                              className="bg-white/70 border-gray-200 focus:border-yellow-500 focus:ring-yellow-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="portOfOrigin"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-teal-500" />
+                            Puerto de Origen
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="Puerto de salida"
+                              className="bg-white/70 border-gray-200 focus:border-teal-500 focus:ring-teal-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="portOfDestination"
+                      render={({ field }) => (
+                        <FormItem className="md:col-span-2">
+                          <FormLabel className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-cyan-500" />
+                            Puerto de Destino
+                          </FormLabel>
+                          <FormControl>
+                            <Input 
+                              {...field} 
+                              placeholder="Puerto de llegada"
+                              className="bg-white/70 border-gray-200 focus:border-cyan-500 focus:ring-cyan-500/20"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Selección de Productos */}
+              <Card className="border-0 shadow-sm bg-white/80 backdrop-blur-sm">
+                <CardHeader className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-purple-100">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-gradient-to-br from-purple-500 to-violet-600 rounded-lg shadow-sm">
+                      <Sparkles className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg bg-gradient-to-r from-purple-900 to-violet-900 bg-clip-text text-transparent">
+                        Productos del Pedido
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">Selecciona y configura los productos</p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-6">
+                  {/* Búsqueda de productos */}
+                  <div className="mb-6">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar productos por nombre, proveedor o tags..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10 bg-white/70 border-gray-200 focus:border-purple-500 focus:ring-purple-500/20"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Lista de productos disponibles */}
+                  <div className="mb-6">
+                    <h4 className="text-sm font-medium text-gray-700 mb-3">Productos Disponibles</h4>
+                    <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50/50">
+                      {filteredProductLeads.map((lead) => (
+                        <div
+                          key={lead.id}
+                          className="flex items-center justify-between p-3 hover:bg-white/70 border-b border-gray-100 last:border-b-0 cursor-pointer transition-colors"
+                          onClick={() => handleSelectProductLead(lead)}
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-gray-900">{lead.name}</p>
+                              <Badge variant="outline" className="text-xs">{lead.supplierName}</Badge>
+                            </div>
+                            <div className="flex gap-4 text-xs text-muted-foreground mt-1">
+                              <span>Precio: ${lead.referencePriceUsd?.toFixed(2) || "N/A"}</span>
+                              <span>MOQ: {lead.moq || "N/A"}</span>
+                              <span>Estado: {lead.latestStatus || "N/A"}</span>
+                            </div>
+                          </div>
                           <Button
                             type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => handleSelectProductLead(lead)}
+                            size="sm"
+                            variant="ghost"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleSelectProductLead(lead)
+                            }}
                             disabled={fields.some((item) => item.productLeadId === lead.id)}
+                            className="text-purple-600 hover:text-purple-700 hover:bg-purple-50"
                           >
                             <PlusCircle className="h-4 w-4" />
                           </Button>
-                        </TableCell>
-                        <TableCell>{lead.name}</TableCell>
-                        <TableCell>{lead.supplierName}</TableCell>
-                        <TableCell>${lead.referencePriceUsd?.toFixed(2) || "N/A"}</TableCell>
-                        <TableCell className="capitalize">{lead.latestStatus || "N/A"}</TableCell>
-                        <TableCell>{lead.moq || "N/A"}</TableCell>
-                      </TableRow>
-                    ))}
-                    {filteredProductLeads.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">
-                          No se encontraron productos con ese criterio.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-              {/* CORRECCIÓN AQUÍ: Usar <p> para errores de array */}
-              {form.formState.errors.items &&
-                typeof form.formState.errors.items === "object" &&
-                !Array.isArray(form.formState.errors.items) &&
-                form.formState.errors.items.message && (
-                  <p className="text-sm font-medium text-destructive">{form.formState.errors.items.message}</p>
-                )}
+                        </div>
+                      ))}
+                      {filteredProductLeads.length === 0 && (
+                        <div className="p-6 text-center text-muted-foreground">
+                          <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p>No se encontraron productos</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-              {fields.length > 0 && (
-                <>
-                  <h3 className="text-lg font-medium text-foreground pt-4 mb-2">Items del Pedido</h3>
-                  <ScrollArea className="h-[250px] border rounded-md">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Producto</TableHead>
-                          <TableHead className="w-[100px]">Cantidad*</TableHead>
-                          <TableHead className="w-[120px]">Precio USD*</TableHead>
-                          <TableHead className="w-[100px]">Desc. %</TableHead>
-                          <TableHead className="w-[50px]"></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {fields.map((field, index) => (
-                          <TableRow key={field.id}>
-                            <TableCell>
-                              <p className="font-medium">{field.productLeadName}</p>
-                              <p className="text-xs text-muted-foreground">Prov: {field.supplierName}</p>
-                            </TableCell>
-                            <TableCell>
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.quantity`}
-                                render={({ field: itemField }) => (
-                                  <FormItem>
-                                    <FormControl>
-                                      <Input type="number" {...itemField} />
-                                    </FormControl>
-                                    <FormMessage className="text-xs" />
-                                  </FormItem>
-                                )}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.unitPriceUsd`}
-                                render={({ field: itemField }) => (
-                                  <FormItem>
-                                    <FormControl>
-                                      <Input type="number" step="0.01" {...itemField} />
-                                    </FormControl>
-                                    <FormMessage className="text-xs" />
-                                  </FormItem>
-                                )}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <FormField
-                                control={form.control}
-                                name={`items.${index}.discountPercent`}
-                                render={({ field: itemField }) => (
-                                  <FormItem>
-                                    <FormControl>
-                                      <Input type="number" step="0.1" {...itemField} />
-                                    </FormControl>
-                                    <FormMessage className="text-xs" />
-                                  </FormItem>
-                                )}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                </>
-              )}
+                  {/* Tabla de productos seleccionados */}
+                  {fields.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-3">Productos Seleccionados</h4>
+                      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white/70">
+                        <Table>
+                          <TableHeader>
+                            <tr className="bg-gradient-to-r from-purple-50 to-violet-50">
+                              <TableHead className="font-semibold">Producto</TableHead>
+                              <TableHead className="font-semibold">Cantidad</TableHead>
+                              <TableHead className="font-semibold">Precio USD</TableHead>
+                              <TableHead className="font-semibold">Descuento %</TableHead>
+                              <TableHead className="font-semibold">Total</TableHead>
+                              <TableHead className="w-12"></TableHead>
+                            </tr>
+                          </TableHeader>
+                          <TableBody>
+                            {fields.map((item, index) => {
+                              const quantity = form.watch(`items.${index}.quantity`) || 0
+                              const unitPrice = form.watch(`items.${index}.unitPriceUsd`) || 0
+                              const discount = form.watch(`items.${index}.discountPercent`) || 0
+                              const total = quantity * unitPrice * (1 - discount / 100)
+                              
+                              return (
+                                <tr key={item.id} className="hover:bg-purple-50/30 transition-colors">
+                                  <TableCell>
+                                    <div>
+                                      <p className="font-medium text-gray-900">{item.productLeadName}</p>
+                                      <p className="text-xs text-muted-foreground">{item.supplierName}</p>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <FormField
+                                      control={form.control}
+                                      name={`items.${index}.quantity`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormControl>
+                                            <Input
+                                              type="number"
+                                              min="1"
+                                              {...field}
+                                              className="w-20 text-center"
+                                              onChange={(e) => field.onChange(Number(e.target.value))}
+                                            />
+                                          </FormControl>
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <FormField
+                                      control={form.control}
+                                      name={`items.${index}.unitPriceUsd`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormControl>
+                                            <Input
+                                              type="number"
+                                              step="0.01"
+                                              min="0"
+                                              {...field}
+                                              className="w-24"
+                                              onChange={(e) => field.onChange(Number(e.target.value))}
+                                            />
+                                          </FormControl>
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <FormField
+                                      control={form.control}
+                                      name={`items.${index}.discountPercent`}
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormControl>
+                                            <Input
+                                              type="number"
+                                              min="0"
+                                              max="100"
+                                              {...field}
+                                              className="w-20 text-center"
+                                              onChange={(e) => field.onChange(Number(e.target.value))}
+                                            />
+                                          </FormControl>
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="font-medium text-green-700">
+                                      ${total.toFixed(2)}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => remove(index)}
+                                      className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </TableCell>
+                                </tr>
+                              )
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+
+                  {fields.length === 0 && (
+                    <div className="text-center py-8 bg-gray-50/50 rounded-lg border-2 border-dashed border-gray-200">
+                      <Package className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                      <p className="text-muted-foreground font-medium">No hay productos seleccionados</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Busca y selecciona productos de la lista superior
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </ScrollArea>
 
-          <DialogFooter className="pt-6">
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Cancelar
-              </Button>
-            </DialogClose>
-            <Button type="submit" disabled={form.formState.isSubmitting}>
-              {form.formState.isSubmitting ? "Guardando..." : "Crear Pedido"}
-            </Button>
+          {/* Footer con acciones */}
+          <DialogFooter className="bg-gradient-to-r from-gray-50 to-slate-50 border-t border-gray-100 p-6 mt-6 rounded-b-lg">
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-4">
+                {fields.length > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    <span className="font-medium text-gray-700">Total: </span>
+                    <span className="text-lg font-bold text-green-700">${totalValue.toFixed(2)} USD</span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex gap-3">
+                <DialogClose asChild>
+                  <Button 
+                    type="button" 
+                    variant="outline"
+                    disabled={isSubmitting}
+                    className="bg-white/70 hover:bg-white border-gray-300"
+                  >
+                    Cancelar
+                  </Button>
+                </DialogClose>
+                <Button 
+                  type="submit" 
+                  disabled={isSubmitting || fields.length === 0}
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl transition-all duration-300"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      {isEditMode ? "Actualizar Pedido" : "Crear Pedido"}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </DialogFooter>
         </form>
       </Form>
-    </>
+    </div>
   )
 }

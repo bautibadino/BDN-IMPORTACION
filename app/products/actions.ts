@@ -138,6 +138,90 @@ export async function deleteProductAction(id: string) {
   }
 }
 
-export async function getProductAction(id: string): Promise<Product | null> {
-  return (await getProductById(id)) || null
+export async function getProductAction(id: string) {
+  return await getProductById(id)
+}
+
+export async function updateProductImagesAction(id: string, imageUrls: string[]) {
+  try {
+    // Obtener el producto actual para mantener las imágenes existentes
+    const existingProduct = await getProductById(id)
+    if (!existingProduct) {
+      return { success: false, message: "Producto no encontrado." }
+    }
+
+    // Combinar imágenes existentes con las nuevas
+    const existingImages = existingProduct.images ? existingProduct.images.split(',').filter(img => img.trim()) : []
+    const allImages = [...existingImages, ...imageUrls]
+    const imagesString = allImages.join(',')
+    
+    const updatedProduct = await updateProduct(id, { images: imagesString })
+    if (!updatedProduct) {
+      return { success: false, message: "Error al actualizar el producto." }
+    }
+    
+    revalidatePath("/products")
+    revalidatePath(`/products/${id}`)
+    return { 
+      success: true, 
+      message: `${imageUrls.length} imagen${imageUrls.length !== 1 ? 'es' : ''} agregada${imageUrls.length !== 1 ? 's' : ''} exitosamente.`,
+      product: updatedProduct 
+    }
+  } catch (error) {
+    console.error("Error updating product images:", error)
+    return { success: false, message: "Error al actualizar las imágenes del producto." }
+  }
+}
+
+export async function removeProductImageAction(id: string, imageUrl: string) {
+  try {
+    const existingProduct = await getProductById(id)
+    if (!existingProduct) {
+      return { success: false, message: "Producto no encontrado." }
+    }
+
+    // Filtrar la imagen a eliminar
+    const existingImages = existingProduct.images ? existingProduct.images.split(',').filter(img => img.trim()) : []
+    const filteredImages = existingImages.filter(img => img !== imageUrl)
+    const imagesString = filteredImages.join(',')
+    
+    const updatedProduct = await updateProduct(id, { images: imagesString })
+    if (!updatedProduct) {
+      return { success: false, message: "Error al actualizar el producto." }
+    }
+    
+    revalidatePath("/products")
+    revalidatePath(`/products/${id}`)
+    return { 
+      success: true, 
+      message: "Imagen eliminada exitosamente.",
+      product: updatedProduct 
+    }
+  } catch (error) {
+    console.error("Error removing product image:", error)
+    return { success: false, message: "Error al eliminar la imagen del producto." }
+  }
+}
+
+export async function replaceProductImagesAction(id: string, imageUrls: string[]) {
+  try {
+    // Reemplazar todas las imágenes con las nuevas
+    const imagesString = imageUrls.join(',')
+    
+    const updatedProduct = await updateProduct(id, { images: imagesString })
+    if (!updatedProduct) {
+      return { success: false, message: "Producto no encontrado." }
+    }
+    
+    revalidatePath("/products")
+    revalidatePath(`/products/${id}`)
+    return { 
+      success: true, 
+      message: `Imágenes reemplazadas exitosamente. Total: ${imageUrls.length} imagen${imageUrls.length !== 1 ? 'es' : ''}.`,
+      product: updatedProduct 
+    }
+  } catch (error) {
+    console.error("Error replacing product images:", error)
+    return { success: false, message: "Error al reemplazar las imágenes del producto." }
+  }
 }

@@ -13,9 +13,10 @@ import { createOrUpdateProductFromLeadAction } from "@/app/products/actions"
 import { useToast } from "@/components/ui/use-toast"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
-
-const USD_TO_ARS_RATE = 1250.0
+import { useState, useEffect } from "react"
+import { getOrderCostBreakdownAction } from "@/app/orders/actions"
+import type { CostBreakdown } from "@/lib/costs"
+import { getUsdToArsRate, DEFAULT_MARKUP_PERCENTAGE } from "@/lib/settings"
 
 const stockItemSchema = z.object({
   productLeadId: z.string(),
@@ -43,23 +44,81 @@ interface AddToStockFormProps {
   orderId: string
   orderItems: OrderItem[]
   allProductLeads: ProductLead[]
+  order: any // Para acceder a isProcessedToStock
   onClose: () => void
 }
 
-export function AddToStockForm({ orderId, orderItems, allProductLeads, onClose }: AddToStockFormProps) {
+export function AddToStockForm({ orderId, orderItems, allProductLeads, order, onClose }: AddToStockFormProps) {
   const { toast } = useToast()
   const router = useRouter()
   const [isProcessing, setIsProcessing] = useState(false)
+  const [costBreakdown, setCostBreakdown] = useState<CostBreakdown[]>([])
+  const [loadingCosts, setLoadingCosts] = useState(true)
+
+  // Verificar si la orden ya fue procesada
+  if (order?.isProcessedToStock) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Orden Ya Procesada</DialogTitle>
+          <DialogDescription>
+            Esta orden ya fue procesada a stock anteriormente.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-6">
+          <div className="text-center p-6 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-green-800 font-medium">✅ Items ya agregados a stock</p>
+            <p className="text-green-600 text-sm mt-2">
+              Procesado el {order.processedAt ? 
+                new Date(order.processedAt).toLocaleDateString() : 
+                "anteriormente"
+              }
+            </p>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Cerrar</Button>
+        </DialogFooter>
+      </>
+    )
+  }
+
+  // Cargar los costos calculados al montar el componente
+  useEffect(() => {
+    async function loadCosts() {
+      try {
+        const result = await getOrderCostBreakdownAction(orderId)
+        if (result.success && result.data) {
+          setCostBreakdown(result.data.items)
+        }
+      } catch (error) {
+        console.error("Error loading cost breakdown:", error)
+        toast({
+          title: "Advertencia",
+          description: "No se pudieron cargar los costos calculados. Se usarán precios FOB.",
+          variant: "destructive",
+        })
+      } finally {
+        setLoadingCosts(false)
+      }
+    }
+    loadCosts()
+  }, [orderId, toast])
 
   const initialItemsToStock = orderItems.map((item) => {
     const lead = allProductLeads.find((pl) => pl.id === item.productLeadId)
+    const costItem = costBreakdown.find((ci) => ci.productLeadId === item.productLeadId)
+    
+    // Usar el costo final calculado si está disponible, sino usar el precio FOB como fallback
+    const finalUnitCostUsd = costItem?.finalUnitCostUsd || item.unitPriceUsd
+    
     return {
       productLeadId: item.productLeadId,
       productName: lead?.name || "Producto Desconocido",
       orderedQuantity: item.quantity,
       receivedQuantity: item.quantity,
-      finalUnitCostUsd: item.unitPriceUsd,
-      markupPercentage: 50,
+      finalUnitCostUsd: finalUnitCostUsd,
+      markupPercentage: DEFAULT_MARKUP_PERCENTAGE,
       location: "deposito_central",
       internalCode: "",
     }
@@ -71,6 +130,32 @@ export function AddToStockForm({ orderId, orderItems, allProductLeads, onClose }
       itemsToStock: initialItemsToStock,
     },
   })
+
+  // Actualizar el formulario cuando se carguen los costos
+  useEffect(() => {
+    if (!loadingCosts) {
+      const updatedItemsToStock = orderItems.map((item) => {
+        const lead = allProductLeads.find((pl) => pl.id === item.productLeadId)
+        const costItem = costBreakdown.find((ci) => ci.productLeadId === item.productLeadId)
+        
+        // Usar el costo final calculado si está disponible, sino usar el precio FOB como fallback
+        const finalUnitCostUsd = costItem?.finalUnitCostUsd || item.unitPriceUsd
+        
+        return {
+          productLeadId: item.productLeadId,
+          productName: lead?.name || "Producto Desconocido",
+          orderedQuantity: item.quantity,
+          receivedQuantity: item.quantity,
+                   finalUnitCostUsd: finalUnitCostUsd,
+         markupPercentage: DEFAULT_MARKUP_PERCENTAGE,
+         location: "deposito_central",
+          internalCode: "",
+        }
+      })
+      
+      form.reset({ itemsToStock: updatedItemsToStock })
+    }
+  }, [loadingCosts, costBreakdown, orderItems, allProductLeads, form])
 
   const { fields } = useFieldArray({
     control: form.control,
@@ -143,6 +228,21 @@ export function AddToStockForm({ orderId, orderItems, allProductLeads, onClose }
         <DialogTitle>Agregar Items Recibidos al Stock</DialogTitle>
         <DialogDescription>
           Confirma las cantidades recibidas, costos finales y márgenes para los productos de este pedido.
+          {loadingCosts && (
+            <span className="block text-amber-600 text-sm mt-1">
+              ⏳ Cargando costos calculados...
+            </span>
+          )}
+          {!loadingCosts && costBreakdown.length > 0 && (
+            <span className="block text-green-600 text-sm mt-1">
+              ✅ Usando costos finales (incluye importación)
+            </span>
+          )}
+          {!loadingCosts && costBreakdown.length === 0 && (
+            <span className="block text-amber-600 text-sm mt-1">
+              ⚠️ Usando solo precios FOB (sin costos de importación)
+            </span>
+          )}
         </DialogDescription>
       </DialogHeader>
       <Form {...form}>
@@ -163,14 +263,25 @@ export function AddToStockForm({ orderId, orderItems, allProductLeads, onClose }
               <TableBody>
                 {fields.map((field, index) => {
                   const currentItem = watchedItems[index]
-                  const finalUnitCostArs = currentItem.finalUnitCostUsd * USD_TO_ARS_RATE
+                  const finalUnitCostArs = currentItem.finalUnitCostUsd * getUsdToArsRate()
                   const finalPriceArs = finalUnitCostArs * (1 + currentItem.markupPercentage / 100)
+
+                  // Obtener el precio FOB original para comparación
+                  const originalOrderItem = orderItems.find(oi => oi.productLeadId === currentItem.productLeadId)
+                  const fobPriceUsd = originalOrderItem?.unitPriceUsd || 0
+                  const costItem = costBreakdown.find((ci) => ci.productLeadId === currentItem.productLeadId)
+                  const hasImportCosts = costItem && costItem.importCostPerUnit > 0
 
                   return (
                     <TableRow key={field.id}>
                       <TableCell>
                         <p className="font-medium">{currentItem.productName}</p>
                         <p className="text-xs text-muted-foreground">Pedido: {currentItem.orderedQuantity}</p>
+                        {hasImportCosts && (
+                          <p className="text-xs text-green-600">
+                            FOB: ${fobPriceUsd.toFixed(2)} + Imp: ${costItem.importCostPerUnit.toFixed(2)}
+                          </p>
+                        )}
                       </TableCell>
                       <TableCell>
                         <FormField

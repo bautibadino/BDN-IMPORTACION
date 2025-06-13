@@ -114,6 +114,7 @@ model ProductLead {
   statuses          ProductLeadStatus[]
   orderItems        OrderItem[]
   product           Product? // Relación uno a uno con Product
+  batches           ProductBatch[] // Relación con lotes de este producto
 }
 
 model ProductLeadStatus {
@@ -138,9 +139,12 @@ model Order {
   estimatedArrival  DateTime?
   portOfOrigin      String?
   portOfDestination String?
+  isProcessedToStock Boolean    @default(false) // Control para evitar duplicar importaciones
+  processedAt       DateTime?  // Fecha cuando se procesó a stock
   items             OrderItem[]
   costs             ImportCost[]
   documents         Document[]
+  productBatches    ProductBatch[] // Relación con lotes creados
 }
 
 model OrderItem {
@@ -177,16 +181,39 @@ model Document {
 }
 
 model Product {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   name             String
   internalCode     String?
-  finalUnitCostUsd Float
+  finalUnitCostUsd Float          // Costo promedio calculado
   finalUnitCostArs Float
   markupPercentage Float
   finalPriceArs    Float
-  stock            Int
+  stock            Int            // Stock total (suma de todos los lotes)
   location         String?
   mlListingUrl     String?
-  productLeadId    String    @unique // Clave para la relación 1 a 1
-  productLead      ProductLead @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+  images           String?        // URLs de imágenes separadas por comas
+  productLeadId    String         @unique // Clave para la relación 1 a 1
+  productLead      ProductLead    @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+  batches          ProductBatch[] // Relación con lotes individuales
+}
+
+model ProductBatch {
+  id               String   @id @default(cuid())
+  batchNumber      String   // Número de lote generado automáticamente
+  quantity         Int      // Cantidad de este lote específico
+  unitCostUsd      Float    // Costo unitario de este lote específico
+  totalCostUsd     Float    // Costo total del lote (quantity * unitCostUsd)
+  receivedAt       DateTime @default(now()) // Fecha de recepción del lote
+  location         String?  // Ubicación específica del lote
+  notes            String?  // Notas del lote
+  
+  // Relaciones
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId          String
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productLeadId    String
+  productLead      ProductLead @relation(fields: [productLeadId], references: [id])
+  
+  @@unique([orderId, productLeadId]) // Un lote por producto por orden
 }

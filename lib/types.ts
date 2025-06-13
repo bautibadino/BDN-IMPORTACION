@@ -11,6 +11,21 @@ export type {
   Document,
 } from "@prisma/client"
 
+// Tipo para ProductBatch (definido manualmente hasta que TypeScript lo reconozca)
+export type ProductBatch = {
+  id: string
+  batchNumber: string
+  quantity: number
+  unitCostUsd: number
+  totalCostUsd: number
+  receivedAt: Date
+  location?: string | null
+  notes?: string | null
+  productId: string
+  orderId: string
+  productLeadId: string
+}
+
 // Mantener los tipos de formulario que son útiles para las Server Actions y los formularios
 export type SupplierFormData = {
   name: string
@@ -123,4 +138,21 @@ export type ProductFormData = {
   stock: number
   location?: string | null
   mlListingUrl?: string | null
+  images?: string | null
+}
+
+// Tipo extendido para Product que incluye el nuevo campo images
+export type ProductWithImages = {
+  id: string
+  name: string
+  internalCode: string | null
+  finalUnitCostUsd: number
+  finalUnitCostArs: number
+  markupPercentage: number
+  finalPriceArs: number
+  stock: number
+  location: string | null
+  mlListingUrl: string | null
+  images: string | null
+  productLeadId: string
 }

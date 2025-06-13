@@ -96,11 +96,61 @@ export const getDocumentsByOrderId = async (orderId: string) => await prisma.doc
 export const addDocument = async (data: DocumentFormData) => await prisma.document.create({ data })
 
 // --- Product Functions ---
-export const getProducts = async () => await prisma.product.findMany({ orderBy: { name: "asc" } })
-export const getProductById = async (id: string) => await prisma.product.findUnique({ where: { id } })
+export const getProducts = async () => await prisma.product.findMany({ 
+  orderBy: { name: "asc" },
+  include: { batches: true }
+})
+export const getProductById = async (id: string) => await prisma.product.findUnique({ 
+  where: { id },
+  include: { batches: { orderBy: { receivedAt: "desc" } } }
+})
 export const getProductByProductLeadId = async (productLeadId: string) =>
-  await prisma.product.findUnique({ where: { productLeadId } })
+  await prisma.product.findUnique({ 
+    where: { productLeadId },
+    include: { batches: { orderBy: { receivedAt: "desc" } } }
+  })
 export const addProduct = async (data: Omit<Product, "id">) => await prisma.product.create({ data })
 export const updateProduct = async (id: string, data: Partial<Omit<Product, "id">>) =>
   await prisma.product.update({ where: { id }, data })
 export const deleteProduct = async (id: string) => await prisma.product.delete({ where: { id } })
+
+// --- ProductBatch Functions ---
+export const addProductBatch = async (data: {
+  batchNumber: string
+  quantity: number
+  unitCostUsd: number
+  totalCostUsd: number
+  location?: string | null
+  notes?: string | null
+  productId: string
+  orderId: string
+  productLeadId: string
+}) => {
+  console.log("Creating ProductBatch with data:", data)
+  const result = await prisma.productBatch.create({ data })
+  console.log("ProductBatch created successfully:", result)
+  return result
+}
+
+export const getProductBatchesByProductId = async (productId: string) =>
+  await prisma.productBatch.findMany({ 
+    where: { productId },
+    orderBy: { receivedAt: "desc" }
+  })
+
+export const getProductBatchesByOrderId = async (orderId: string) =>
+  await prisma.productBatch.findMany({ 
+    where: { orderId },
+    include: { product: true, productLead: true }
+  })
+
+// Función para calcular el costo promedio de un producto basado en sus lotes
+export const calculateAverageProductCost = async (productId: string): Promise<number> => {
+  const batches = await getProductBatchesByProductId(productId)
+  if (batches.length === 0) return 0
+  
+  const totalQuantity = batches.reduce((sum, batch) => sum + batch.quantity, 0)
+  const totalCost = batches.reduce((sum, batch) => sum + batch.totalCostUsd, 0)
+  
+  return totalQuantity > 0 ? totalCost / totalQuantity : 0
+}

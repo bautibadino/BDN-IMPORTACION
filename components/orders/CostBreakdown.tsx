@@ -236,30 +236,46 @@ export default function CostBreakdown({ orderId, order, onOrderUpdated }: CostBr
         <Card>
           <CardContent className="p-6">
             <div className="text-center space-y-4">
-              <div>
-                <h3 className="text-lg font-semibold mb-2">Finalizar Orden</h3>
-                <p className="text-sm text-gray-600">
-                  Al finalizar la orden, los productos se crearán o actualizarán en stock
-                  con los costos finales calculados.
-                </p>
-              </div>
-              <Button 
-                onClick={handleFinalizeOrder}
-                disabled={finalizing}
-                className="w-full md:w-auto"
-              >
-                {finalizing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Finalizando...
-                  </>
-                ) : (
-                  <>
-                    <Package className="h-4 w-4 mr-2" />
-                    Finalizar y Crear Productos
-                  </>
-                )}
-              </Button>
+              {(order as any).isProcessedToStock ? (
+                <div>
+                  <h3 className="text-lg font-semibold mb-2 text-green-600">✅ Orden Procesada</h3>
+                  <p className="text-sm text-gray-600">
+                    Esta orden ya fue procesada a stock el{" "}
+                    {(order as any).processedAt ? 
+                      new Date((order as any).processedAt).toLocaleDateString() : 
+                      "anteriormente"
+                    }.
+                  </p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Los productos ya fueron creados/actualizados en stock con los costos finales.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h3 className="text-lg font-semibold mb-2">Finalizar Orden</h3>
+                  <p className="text-sm text-gray-600">
+                    Al finalizar la orden, los productos se crearán o actualizarán en stock
+                    con los costos finales calculados.
+                  </p>
+                  <Button 
+                    onClick={handleFinalizeOrder}
+                    disabled={finalizing}
+                    className="w-full md:w-auto"
+                  >
+                    {finalizing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Finalizando...
+                      </>
+                    ) : (
+                      <>
+                        <Package className="h-4 w-4 mr-2" />
+                        Finalizar y Crear Productos
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

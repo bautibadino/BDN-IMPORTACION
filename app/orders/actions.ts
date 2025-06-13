@@ -17,6 +17,8 @@ import {
   addProduct,
   getProductByProductLeadId,
   updateProduct,
+  addProductBatch,
+  calculateAverageProductCost,
 } from "@/lib/store"
 import type { OrderFormData, OrderItemFormData, ImportCostFormData, DocumentFormData, Product } from "@/lib/types"
 import type { Order } from "@prisma/client" // Importar desde prisma client
@@ -176,15 +178,28 @@ export async function getOrderCostBreakdownAction(orderId: string) {
 // --- Order Finalization Actions ---
 export async function finalizeOrderAction(orderId: string) {
   try {
+    console.log("Starting finalizeOrderAction for order:", orderId)
+    
     // Obtener la orden
     const order = await getOrderById(orderId)
     if (!order) {
       return { success: false, message: "Orden no encontrada." }
     }
 
+    console.log("Order found:", order.orderNumber, "status:", order.status)
+
     // Solo procesar si el estado es "recibido"
     if (order.status !== "recibido") {
       return { success: false, message: "La orden debe estar en estado 'recibido' para finalizar." }
+    }
+
+    // Verificar si ya fue procesada a stock
+    if ((order as any).isProcessedToStock) {
+      return { 
+        success: false, 
+        message: "Esta orden ya fue procesada a stock anteriormente.",
+        alreadyProcessed: true
+      }
     }
 
     // Obtener items y costos
@@ -198,51 +213,84 @@ export async function finalizeOrderAction(orderId: string) {
     // Calcular costos
     const costCalculation = calculateOrderCosts(orderItems, importCosts)
     
-    // Constante para conversión USD a ARS (esto debería venir de configuración)
-    const USD_TO_ARS_RATE = 1000
+    // Obtener el tipo de cambio actual desde configuración  
+    const { getUsdToArsRate, DEFAULT_MARKUP_PERCENTAGE } = await import("@/lib/settings")
+    const USD_TO_ARS_RATE = getUsdToArsRate()
 
-    // Crear o actualizar productos
+    // Crear o actualizar productos con sistema de lotes
     const processedProducts = []
+    const processedBatches = []
+    
     for (const item of costCalculation.items) {
       const productLead = orderItems.find(oi => oi.productLeadId === item.productLeadId)
       if (!productLead) continue
 
       // Buscar si ya existe un producto para este ProductLead
-      const existingProduct = await getProductByProductLeadId(item.productLeadId)
+      let existingProduct = await getProductByProductLeadId(item.productLeadId)
       
       const finalUnitCostArs = item.finalUnitCostUsd * USD_TO_ARS_RATE
-      const markupPercentage = 30 // Margen por defecto
+      const markupPercentage = DEFAULT_MARKUP_PERCENTAGE
       const finalPriceArs = finalUnitCostArs * (1 + markupPercentage / 100)
 
-      if (existingProduct) {
-        // Actualizar producto existente - sumar al stock
-        const newStock = existingProduct.stock + item.quantity
-        const updatedProduct = await updateProduct(existingProduct.id, {
-          finalUnitCostUsd: item.finalUnitCostUsd,
-          finalUnitCostArs,
-          markupPercentage,
-          finalPriceArs,
-          stock: newStock
-        })
-        processedProducts.push({ ...updatedProduct, operation: "updated" })
-      } else {
-        // Crear nuevo producto
+      if (!existingProduct) {
+        // Crear nuevo producto si no existe
         const newProduct: Omit<Product, "id"> = {
           productLeadId: item.productLeadId,
           name: item.productName,
           internalCode: null,
-          finalUnitCostUsd: item.finalUnitCostUsd,
+          finalUnitCostUsd: item.finalUnitCostUsd, // Será recalculado después
           finalUnitCostArs,
           markupPercentage,
           finalPriceArs,
-          stock: item.quantity,
+          stock: 0, // Se actualizará con la suma de lotes
           location: null,
           mlListingUrl: null
         }
-        const createdProduct = await addProduct(newProduct)
-        processedProducts.push({ ...createdProduct, operation: "created" })
+        existingProduct = await addProduct(newProduct)
+        processedProducts.push({ ...existingProduct, operation: "created" })
+      }
+
+      // Crear el lote individual para este producto
+      const batchNumber = `${order.orderNumber}-${item.productLeadId.slice(-4)}`
+      console.log("Creating batch:", batchNumber, "for product:", existingProduct.id)
+      const newBatch = await addProductBatch({
+        batchNumber,
+        quantity: item.quantity,
+        unitCostUsd: item.finalUnitCostUsd,
+        totalCostUsd: item.totalFinalCostUsd,
+        location: null,
+        notes: `Importación orden ${order.orderNumber}`,
+        productId: existingProduct.id,
+        orderId: order.id,
+        productLeadId: item.productLeadId
+      })
+      console.log("Batch created:", newBatch)
+      processedBatches.push(newBatch)
+
+      // Calcular el nuevo costo promedio y stock total
+      const newAverageCost = await calculateAverageProductCost(existingProduct.id)
+      const newStock = existingProduct.stock + item.quantity
+      const newFinalUnitCostArs = newAverageCost * USD_TO_ARS_RATE
+      const newFinalPriceArs = newFinalUnitCostArs * (1 + markupPercentage / 100)
+
+      // Actualizar el producto con los nuevos valores calculados
+      const updatedProduct = await updateProduct(existingProduct.id, {
+        finalUnitCostUsd: newAverageCost,
+        finalUnitCostArs: newFinalUnitCostArs,
+        finalPriceArs: newFinalPriceArs,
+        stock: newStock
+      })
+      
+      if (!processedProducts.find(p => p.id === existingProduct.id)) {
+        processedProducts.push({ ...updatedProduct, operation: "updated" })
       }
     }
+
+    // Marcar la orden como procesada
+    await updateOrder(orderId, {
+      isProcessedToStock: true,
+      processedAt: new Date().toISOString()
+    } as any)
 
     revalidatePath("/orders")
     revalidatePath(`/orders/${orderId}`)
@@ -250,8 +298,9 @@ export async function finalizeOrderAction(orderId: string) {
 
     return { 
       success: true, 
-      message: `Orden finalizada. ${processedProducts.length} productos procesados.`,
+      message: `Orden finalizada. ${processedProducts.length} productos y ${processedBatches.length} lotes procesados.`,
       processedProducts,
+      processedBatches,
       costCalculation
     }
   } catch (error) {
