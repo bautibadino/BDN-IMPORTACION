@@ -98,18 +98,39 @@ export const addDocument = async (data: DocumentFormData) => await prisma.docume
 // --- Product Functions ---
 export const getProducts = async () => await prisma.product.findMany({ 
   orderBy: { name: "asc" },
-  include: { batches: true }
+  include: { 
+    batches: true,
+    categories: {
+      include: {
+        category: true
+      }
+    }
+  }
 })
 export const getProductById = async (id: string) => await prisma.product.findUnique({ 
   where: { id },
-  include: { batches: { orderBy: { receivedAt: "desc" } } }
+  include: { 
+    batches: { orderBy: { receivedAt: "desc" } },
+    categories: {
+      include: {
+        category: true
+      }
+    }
+  }
 })
 export const getProductByProductLeadId = async (productLeadId: string) =>
   await prisma.product.findUnique({ 
     where: { productLeadId },
-    include: { batches: { orderBy: { receivedAt: "desc" } } }
+    include: { 
+      batches: { orderBy: { receivedAt: "desc" } },
+      categories: {
+        include: {
+          category: true
+        }
+      }
+    }
   })
-export const addProduct = async (data: Omit<Product, "id">) => await prisma.product.create({ data })
+export const addProduct = async (data: any) => await prisma.product.create({ data })
 export const updateProduct = async (id: string, data: Partial<Omit<Product, "id">>) =>
   await prisma.product.update({ where: { id }, data })
 export const deleteProduct = async (id: string) => await prisma.product.delete({ where: { id } })

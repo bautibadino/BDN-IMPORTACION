@@ -68,23 +68,93 @@ enum ImportCostType {
   otros
 }
 
+enum CategoryType {
+  marca
+  tipo
+  rubro
+  material
+  color
+  tamaño
+  otros
+}
+
+enum IVAType {
+  iva_21      // IVA 21%
+  iva_10_5    // IVA 10.5%
+  iva_27      // IVA 27%
+  iva_5       // IVA 5%
+  iva_2_5     // IVA 2.5%
+  no_gravado  // No gravado
+  exento      // Exento
+}
+
+enum InvoiceType {
+  FACTURA_A
+  FACTURA_B
+  FACTURA_C
+  FACTURA_E
+  NOTA_CREDITO_A
+  NOTA_CREDITO_B
+  NOTA_CREDITO_C
+  NOTA_DEBITO_A
+  NOTA_DEBITO_B
+  NOTA_DEBITO_C
+}
+
 // --- MODELS ---
 
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique // Para URLs amigables
+  type        CategoryType
+  description String?
+  color       String?  // Para UI (hex color)
+  icon        String?  // Para UI (icon name)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Jerarquía de categorías
+  parentId String?
+  parent   Category? @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Category[] @relation("CategoryHierarchy")
+
+  // Relación con productos
+  productCategories ProductCategory[]
+
+  @@index([type])
+  @@index([parentId])
+}
+
+model ProductCategory {
+  id         String   @id @default(cuid())
+  productId  String
+  categoryId String
+  isPrimary  Boolean  @default(false) // Categoría principal del producto
+  createdAt  DateTime @default(now())
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, categoryId]) // Un producto no puede tener la misma categoría duplicada
+}
+
 model Supplier {
-  id            String         @id @default(cuid())
-  name          String
-  country       String?
-  contactName   String?
-  whatsapp      String?
-  email         String?        @unique
-  source        String?
-  language      String?
-  rating        Int?
-  isVerified    Boolean?       @default(false)
-  firstContact  DateTime?
-  tags          String?
-  notes         SupplierNote[]
-  productLeads  ProductLead[]
+  id           String         @id @default(cuid())
+  name         String
+  country      String?
+  contactName  String?
+  whatsapp     String?
+  email        String?        @unique
+  source       String?
+  language     String?
+  rating       Int?
+  isVerified   Boolean?       @default(false)
+  firstContact DateTime?
+  tags         String?
+  notes        SupplierNote[]
+  productLeads ProductLead[]
 }
 
 model SupplierNote {
@@ -97,9 +167,9 @@ model SupplierNote {
 }
 
 model ProductLead {
-  id                String             @id @default(cuid())
+  id                String              @id @default(cuid())
   name              String
-  category          String
+  category          String // Mantener por compatibilidad, migraremos gradualmente
   referencePriceUsd Float?
   moq               Int?
   currency          String?
@@ -108,9 +178,9 @@ model ProductLead {
   photoUrl          String?
   sourceUrl         String?
   tags              String?
-  createdAt         DateTime           @default(now())
+  createdAt         DateTime            @default(now())
   supplierId        String
-  supplier          Supplier           @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  supplier          Supplier            @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   statuses          ProductLeadStatus[]
   orderItems        OrderItem[]
   product           Product? // Relación uno a uno con Product
@@ -118,8 +188,8 @@ model ProductLead {
 }
 
 model ProductLeadStatus {
-  id            String     @id @default(cuid())
-  date          DateTime   @default(now())
+  id            String      @id @default(cuid())
+  date          DateTime    @default(now())
   status        LeadStatus
   note          String?
   addedBy       String?
@@ -128,23 +198,23 @@ model ProductLeadStatus {
 }
 
 model Order {
-  id                String       @id @default(cuid())
-  orderNumber       String       @unique
-  shipmentType      ShipmentType
-  incoterm          Incoterm
-  status            OrderStatus
-  forwarder         String?
-  orderDate         DateTime
-  trackingCode      String?
-  estimatedArrival  DateTime?
-  portOfOrigin      String?
-  portOfDestination String?
-  isProcessedToStock Boolean    @default(false) // Control para evitar duplicar importaciones
-  processedAt       DateTime?  // Fecha cuando se procesó a stock
-  items             OrderItem[]
-  costs             ImportCost[]
-  documents         Document[]
-  productBatches    ProductBatch[] // Relación con lotes creados
+  id                 String         @id @default(cuid())
+  orderNumber        String         @unique
+  shipmentType       ShipmentType
+  incoterm           Incoterm
+  status             OrderStatus
+  forwarder          String?
+  orderDate          DateTime
+  trackingCode       String?
+  estimatedArrival   DateTime?
+  portOfOrigin       String?
+  portOfDestination  String?
+  isProcessedToStock Boolean        @default(false) // Control para evitar duplicar importaciones
+  processedAt        DateTime? // Fecha cuando se procesó a stock
+  items              OrderItem[]
+  costs              ImportCost[]
+  documents          Document[]
+  productBatches     ProductBatch[] // Relación con lotes creados
 }
 
 model OrderItem {
@@ -181,39 +251,684 @@ model Document {
 }
 
 model Product {
-  id               String         @id @default(cuid())
+  id               String  @id @default(cuid())
   name             String
   internalCode     String?
-  finalUnitCostUsd Float          // Costo promedio calculado
+  description      String? // Descripción fiscal detallada
+  unit             String? // Unidad de medida (kg, m, unidad, etc.)
+  
+  // Información fiscal OBLIGATORIA
+  ivaType          IVAType @default(iva_21) // Tipo de IVA del producto
+  taxCode          String? // Código tributario del producto
+  
+  // Precios y costos
+  finalUnitCostUsd Float // Costo promedio calculado
   finalUnitCostArs Float
   markupPercentage Float
-  finalPriceArs    Float
-  stock            Int            // Stock total (suma de todos los lotes)
+  finalPriceArs    Float // Precio sin IVA
+  
+  // Stock y ubicación
+  stock            Int // Stock total (suma de todos los lotes)
+  minStock         Int? // Stock mínimo
   location         String?
-  mlListingUrl     String?
-  images           String?        // URLs de imágenes separadas por comas
-  productLeadId    String         @unique // Clave para la relación 1 a 1
-  productLead      ProductLead    @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
-  batches          ProductBatch[] // Relación con lotes individuales
+  images           String? // URLs de imágenes separadas por comas
+
+  // Eliminamos los campos directos de ML ya que ahora usaremos una tabla separada
+  productLeadId String         @unique // Clave para la relación 1 a 1
+  productLead   ProductLead    @relation(fields: [productLeadId], references: [id], onDelete: Cascade)
+  batches       ProductBatch[] // Relación con lotes individuales
+
+  // Nueva relación con publicaciones de MercadoLibre
+  stockMappings MLStockMapping[] // Mapeos de stock para publicaciones
+
+  // Relación con categorías
+  categories ProductCategory[] // Categorías asignadas al producto
+  
+  // Relación con ventas
+  saleItems     SaleItem[]
+  quoteItems    QuoteItem[]
+  creditNotes   CreditNoteItem[]
+}
+
+model MercadoLibreToken {
+  id           String   @id @default(cuid())
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  userId       String? // Si tienes sistema de usuarios
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId]) // Solo un token por usuario
 }
 
 model ProductBatch {
-  id               String   @id @default(cuid())
-  batchNumber      String   // Número de lote generado automáticamente
-  quantity         Int      // Cantidad de este lote específico
-  unitCostUsd      Float    // Costo unitario de este lote específico
-  totalCostUsd     Float    // Costo total del lote (quantity * unitCostUsd)
-  receivedAt       DateTime @default(now()) // Fecha de recepción del lote
-  location         String?  // Ubicación específica del lote
-  notes            String?  // Notas del lote
+  id           String   @id @default(cuid())
+  batchNumber  String // Número de lote generado automáticamente
+  quantity     Int // Cantidad de este lote específico
+  unitCostUsd  Float // Costo unitario de este lote específico
+  totalCostUsd Float // Costo total del lote (quantity * unitCostUsd)
+  receivedAt   DateTime @default(now()) // Fecha de recepción del lote
+  location     String? // Ubicación específica del lote
+  notes        String? // Notas del lote
+
+  // Relaciones
+  productId     String
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId       String
+  order         Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productLeadId String
+  productLead   ProductLead @relation(fields: [productLeadId], references: [id])
+
+  @@unique([orderId, productLeadId]) // Un lote por producto por orden
+}
+
+// NUEVOS MODELOS PARA MERCADOLIBRE
+
+// Tabla para almacenar publicaciones de MercadoLibre
+model MLListing {
+  id         String  @id @default(cuid())
+  mlItemId   String  @unique // MLA1234567890 - ID único de la publicación en ML
+  title      String // Título de la publicación
+  categoryId String // Categoría de ML
+  price      Float // Precio actual
+  currency   String  @default("ARS")
+  condition  String  @default("new") // new, used
+  status     String // active, paused, closed, etc.
+  permalink  String? // URL de la publicación
+  thumbnail  String? // Imagen principal
+
+  // Metadatos de la publicación
+  listingType   String? // bronze, silver, gold, etc.
+  buyingMode    String? // buy_it_now, auction
+  freeShipping  Boolean @default(false)
+  officialStore Boolean @default(false)
+
+  // Control de sincronización
+  syncEnabled Boolean   @default(true)
+  lastSyncAt  DateTime?
+  syncErrors  String? // Errores de la última sincronización
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  stockMappings MLStockMapping[] // Mapeos de productos que alimentan esta publicación
+
+  @@index([mlItemId])
+  @@index([status])
+}
+
+// Tabla para mapear stock de productos a publicaciones (muchos a muchos)
+model MLStockMapping {
+  id String @id @default(cuid())
+
+  // Relación con la publicación de ML
+  listingId String
+  listing   MLListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  // Relación con el producto interno
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Configuración del mapeo
+  quantity Int     @default(1) // Cuántas unidades del producto se usan por unidad vendida
+  priority Int     @default(1) // Prioridad para descontar stock (1 = más prioritario)
+  enabled  Boolean @default(true) // Si este mapeo está activo
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([listingId, productId]) // Un producto no puede estar mapeado dos veces a la misma publicación
+  @@index([listingId])
+  @@index([productId])
+}
+
+// --- MODELOS PARA VENTAS Y CLIENTES ---
+
+enum SaleStatus {
+  borrador
+  confirmada
+  cancelada
+}
+
+enum PaymentMethod {
+  efectivo
+  transferencia
+  debito
+  credito
+  cheque
+  cuenta_corriente
+  qr
+  deposito
+}
+
+enum ChequeStatus {
+  recibido
+  depositado
+  endosado
+  rechazado
+  cobrado
+}
+
+enum CardType {
+  debito
+  credito
+}
+
+enum PaymentStatus {
+  pendiente
+  parcial
+  pagado
+  vencido
+}
+
+enum CustomerType {
+  consumidor_final
+  responsable_inscripto
+  monotributo
+  exento
+}
+
+enum QuoteStatus {
+  borrador
+  enviado
+  aceptado
+  rechazado
+  vencido
+}
+
+model Customer {
+  id            String      @id @default(cuid())
+  businessName  String // Razón social
+  taxId         String?     @unique // CUIT/CUIL
+  customerType  CustomerType
+  contactName   String?     // Nombre del contacto
+  email         String?
+  phone         String?
+  whatsapp      String?
+  address       String?
+  city          String?
+  province      String?
+  postalCode    String?
+  notes         String?
+  isActive      Boolean     @default(true)
+  creditLimit   Float?      // Límite de crédito en cuenta corriente
+  paymentTerms  Int?        // Días de pago (30, 60, etc.)
+  priceList     String?     // Lista de precios que aplica
+  discount      Float?      // Descuento por defecto
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relaciones
+  sales               Sale[]
+  quotes              Quote[]
+  currentAccountItems CurrentAccountItem[]
+  invoices            Invoice[]
+  payments            Payment[]
+  creditNotes         CreditNote[]
+
+  @@index([taxId])
+  @@index([customerType])
+}
+
+model Sale {
+  id              String        @id @default(cuid())
+  saleNumber      String        @unique // Número de venta
+  status          SaleStatus    @default(confirmada)
+  isWhiteInvoice  Boolean       @default(true) // true = en blanco (AFIP), false = en negro
+  saleDate        DateTime      @default(now())
+  deliveryDate    DateTime?
+  
+  // Información fiscal OBLIGATORIA para AFIP (solo si es en blanco)
+  invoiceType     InvoiceType   @default(FACTURA_B)
+  pointOfSale     String        @default("0001") // Punto de venta AFIP
+  invoiceNumber   Int?          // Número secuencial de factura
+  fullNumber      String?       // Número completo (ej: B-0001-00000123)
+  authCode        String?       // CAE - Código de autorización AFIP
+  authCodeExpiry  DateTime?     // Vencimiento del CAE
+  
+  // Montos discriminados (OBLIGATORIO para AFIP)
+  taxedAmount     Float         @default(0) // Monto gravado (base para IVA)
+  nonTaxedAmount  Float         @default(0) // Monto no gravado  
+  exemptAmount    Float         @default(0) // Monto exento
+  grossIncomePerception Float   @default(0) // Percepción IIBB
+  
+  // Totales
+  subtotal        Float
+  taxAmount       Float         @default(0) // IVA total
+  discountAmount  Float         @default(0)
+  total           Float
+  
+  notes           String?
+  internalNotes   String?       // Notas internas no visibles al cliente
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relaciones
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  
+  items       SaleItem[]
+  payments    Payment[]
+  invoices    Invoice[]
+  creditNotes CreditNote[]
+  
+  // Referencia opcional a presupuesto
+  quoteId String?
+  quote   Quote?  @relation(fields: [quoteId], references: [id])
+
+  @@index([customerId])
+  @@index([saleDate])
+  @@index([status])
+  @@index([isWhiteInvoice])
+  @@index([invoiceType])
+  @@index([pointOfSale, invoiceNumber])
+}
+
+model SaleItem {
+  id          String @id @default(cuid())
+  quantity    Int
+  unitPrice   Float    // Precio unitario SIN IVA
+  discount    Float    @default(0)
+  subtotal    Float    // Subtotal SIN IVA (cantidad × precio - descuento)
+  description String?
+  
+  // Información fiscal por línea
+  ivaType     IVAType  @default(iva_21) // Tipo de IVA aplicado (copiado del producto)
+  ivaAmount   Float    @default(0) // Monto de IVA de esta línea
+  totalAmount Float    @default(0) // Total CON IVA (subtotal + ivaAmount)
   
   // Relaciones
-  productId        String
-  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  orderId          String
-  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productLeadId    String
-  productLead      ProductLead @relation(fields: [productLeadId], references: [id])
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model Quote {
+  id             String      @id @default(cuid())
+  quoteNumber    String      @unique
+  status         QuoteStatus
+  quoteDate      DateTime    @default(now())
+  validUntil     DateTime
+  subtotal       Float
+  taxAmount      Float       @default(0)
+  discountAmount Float       @default(0)
+  total          Float
+  notes          String?
+  terms          String?     // Términos y condiciones
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relaciones
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   
-  @@unique([orderId, productLeadId]) // Un lote por producto por orden
+  items QuoteItem[]
+  sales Sale[] // Ventas generadas desde este presupuesto
+
+  @@index([customerId])
+  @@index([quoteDate])
+  @@index([status])
+}
+
+model QuoteItem {
+  id          String @id @default(cuid())
+  quantity    Int
+  unitPrice   Float    // Precio unitario SIN IVA
+  discount    Float    @default(0)
+  subtotal    Float    // Subtotal SIN IVA (cantidad × precio - descuento)
+  description String?
+  
+  // Información fiscal por línea
+  ivaType     IVAType  @default(iva_21) // Tipo de IVA aplicado (copiado del producto)
+  ivaAmount   Float    @default(0) // Monto de IVA de esta línea
+  totalAmount Float    @default(0) // Total CON IVA (subtotal + ivaAmount)
+  
+  // Relaciones
+  quoteId   String
+  quote     Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@index([quoteId])
+  @@index([productId])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  paymentNumber String        @unique
+  amount        Float
+  paymentDate   DateTime      @default(now())
+  method        PaymentMethod
+  reference     String?       // Referencia general
+  notes         String?
+  status        String        @default("completado") // completado, pendiente, rechazado
+  createdAt     DateTime      @default(now())
+
+  // Relaciones
+  saleId String?
+  sale   Sale?  @relation(fields: [saleId], references: [id])
+  
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  
+  currentAccountItems CurrentAccountItem[]
+  
+  // Relaciones con tipos específicos de pago
+  cheque     Cheque?     @relation(fields: [chequeId], references: [id])
+  chequeId   String?
+  
+  cardPayment     CardPayment? @relation(fields: [cardPaymentId], references: [id])
+  cardPaymentId   String?
+  
+  transfer        Transfer?    @relation(fields: [transferId], references: [id])
+  transferId      String?
+
+  @@index([customerId])
+  @@index([paymentDate])
+  @@index([method])
+}
+
+// Modelo específico para cheques
+model Cheque {
+  id           String        @id @default(cuid())
+  chequeNumber String        @unique // Número del cheque
+  bank         String        // Banco emisor
+  branch       String?       // Sucursal
+  amount       Float
+  issueDate    DateTime      // Fecha de emisión
+  dueDate      DateTime      // Fecha de vencimiento
+  issuer       String        // Quien emite el cheque
+  issuerCuit   String?       // CUIT del emisor
+  status       ChequeStatus  @default(recibido)
+  
+  // Campos para tracking
+  depositDate     DateTime?  // Cuando se depositó
+  depositBank     String?    // En qué banco se depositó
+  endorsedTo      String?    // A quien se endosó
+  endorsedDate    DateTime?  // Cuando se endosó
+  rejectionReason String?    // Motivo de rechazo si aplica
+  
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Relaciones
+  payments Payment[]
+
+  @@index([chequeNumber])
+  @@index([bank])
+  @@index([status])
+  @@index([dueDate])
+}
+
+// Modelo para pagos con tarjeta
+model CardPayment {
+  id              String    @id @default(cuid())
+  cardType        CardType  // debito o credito
+  cardBrand       String?   // Visa, Mastercard, etc.
+  lastFourDigits  String?   // Últimos 4 dígitos
+  authCode        String?   // Código de autorización
+  terminalId      String?   // ID de terminal/POS
+  batchNumber     String?   // Número de lote
+  installments    Int       @default(1) // Cuotas
+  fee             Float     @default(0) // Comisión
+  netAmount       Float     // Monto neto después de comisiones
+  
+  notes        String?
+  createdAt    DateTime      @default(now())
+
+  // Relaciones
+  payments Payment[]
+
+  @@index([cardType])
+  @@index([authCode])
+}
+
+// Modelo para transferencias y QR
+model Transfer {
+  id              String    @id @default(cuid())
+  transferType    String    // transferencia, qr, deposito
+  bankFrom        String?   // Banco origen
+  bankTo          String?   // Banco destino
+  accountFrom     String?   // Cuenta origen
+  accountTo       String?   // Cuenta destino
+  reference       String?   // Referencia/código de operación
+  cvu             String?   // CVU para transferencias
+  alias           String?   // Alias para transferencias
+  
+  notes        String?
+  createdAt    DateTime      @default(now())
+
+  // Relaciones
+  payments Payment[]
+
+  @@index([transferType])
+  @@index([reference])
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  invoiceType   String        // A, B, C, E
+  pointOfSale   String        // Punto de venta
+  invoiceDate   DateTime      @default(now())
+  dueDate       DateTime?
+  subtotal      Float
+  taxAmount     Float
+  total         Float
+  status        PaymentStatus @default(pendiente)
+  afipCae       String?       // CAE de AFIP
+  afipVto       DateTime?     // Vencimiento del CAE
+  createdAt     DateTime      @default(now())
+
+  // Relaciones
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  
+  saleId String?
+  sale   Sale?  @relation(fields: [saleId], references: [id])
+
+  currentAccountItems CurrentAccountItem[]
+  creditNotes         CreditNote[]
+
+  @@index([customerId])
+  @@index([invoiceDate])
+  @@index([status])
+}
+
+model CurrentAccountItem {
+  id          String    @id @default(cuid())
+  date        DateTime  @default(now())
+  type        String    // debe, haber
+  concept     String    // factura, pago, nota_credito, etc.
+  reference   String?   // número de factura, recibo, etc.
+  amount      Float
+  balance     Float     // Saldo después de este movimiento
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  // Relaciones
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+  
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id])
+
+  creditNoteId String?
+  creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
+
+  @@index([customerId])
+  @@index([date])
+  @@index([type])
+}
+
+// Notas de Crédito y Débito
+enum CreditNoteReason {
+  devolucion        // Devolución de mercadería
+  descuento         // Descuento o bonificación
+  error_facturacion // Error en facturación
+  anulacion         // Anulación de venta
+  ajuste_precio     // Ajuste de precio
+  garantia          // Garantía
+  otros             // Otros motivos
+}
+
+enum CreditNoteStatus {
+  borrador
+  emitida
+  aplicada
+  anulada
+}
+
+model CreditNote {
+  id               String            @id @default(cuid())
+  creditNoteNumber String            @unique // Número de nota
+  type             InvoiceType       // NOTA_CREDITO_A, NOTA_CREDITO_B, etc.
+  status           CreditNoteStatus  @default(borrador)
+  reason           CreditNoteReason
+  
+  // Información fiscal AFIP
+  pointOfSale      String            @default("0001")
+  noteNumber       Int?              // Número secuencial
+  fullNumber       String?           // Número completo (ej: NC-A-0001-00000123)
+  authCode         String?           // CAE - Código de autorización AFIP
+  authCodeExpiry   DateTime?         // Vencimiento del CAE
+  
+  // Fechas
+  issueDate        DateTime          @default(now())
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  // Montos
+  subtotal         Float
+  taxAmount        Float             @default(0)
+  total            Float
+  
+  // Información adicional
+  description      String            // Motivo detallado
+  notes            String?           // Notas internas
+  
+  // Relaciones
+  customerId       String
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  
+  // Factura original que se está creditando/debitando
+  originalSaleId   String?
+  originalSale     Sale?             @relation(fields: [originalSaleId], references: [id])
+  
+  originalInvoiceId String?
+  originalInvoice   Invoice?         @relation(fields: [originalInvoiceId], references: [id])
+  
+  // Items de la nota
+  items            CreditNoteItem[]
+  
+  // Movimientos de cuenta corriente
+  currentAccountItems CurrentAccountItem[]
+
+  @@index([customerId])
+  @@index([issueDate])
+  @@index([status])
+  @@index([type])
+}
+
+model CreditNoteItem {
+  id             String     @id @default(cuid())
+  quantity       Int
+  unitPrice      Float      // Precio unitario SIN IVA
+  subtotal       Float      // Subtotal SIN IVA
+  description    String
+  
+  // Información fiscal
+  ivaType        IVAType    @default(iva_21)
+  ivaAmount      Float      @default(0)
+  totalAmount    Float      @default(0)
+  
+  // Relaciones
+  creditNoteId   String
+  creditNote     CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  
+  // Producto original (opcional, puede ser un ajuste manual)
+  productId      String?
+  product        Product?   @relation(fields: [productId], references: [id])
+
+  @@index([creditNoteId])
+  @@index([productId])
+}
+
+// --- AUTENTICACIÓN Y USUARIOS ---
+
+enum UserRole {
+  admin
+  manager
+  user
+  viewer
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  password      String?   // Hash de la contraseña
+  image         String?
+  role          UserRole  @default(user)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relaciones para NextAuth.js
+  accounts Account[]
+  sessions Session[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
 }
