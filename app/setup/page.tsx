@@ -18,6 +18,7 @@ export default function SetupPage() {
   const [result, setResult] = useState<string>("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
+  const [dbSynced, setDbSynced] = useState(false)
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -52,6 +53,34 @@ export default function SetupPage() {
     } catch (error) {
       setResult("❌ Error al conectar con el servidor")
       setIsSuccess(false)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSyncDB = async () => {
+    setIsLoading(true)
+    setResult("")
+
+    try {
+      const response = await fetch("/api/setup/sync-db", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token: formData.token }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setResult("✅ Base de datos sincronizada exitosamente")
+        setDbSynced(true)
+      } else {
+        setResult(`❌ Error al sincronizar DB: ${data.error}`)
+      }
+    } catch (error) {
+      setResult("❌ Error al conectar con el servidor")
     } finally {
       setIsLoading(false)
     }
@@ -128,14 +157,26 @@ export default function SetupPage() {
               />
             </div>
 
-            <Button 
-              type="submit" 
-              className="w-full bg-red-600 hover:bg-red-700" 
-              disabled={isLoading || isSuccess}
-            >
-              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isSuccess ? "✅ Admin Creado" : "Crear Usuario Admin"}
-            </Button>
+            <div className="space-y-2">
+              <Button 
+                type="button"
+                onClick={handleSyncDB}
+                className="w-full bg-blue-600 hover:bg-blue-700" 
+                disabled={isLoading || dbSynced}
+              >
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {dbSynced ? "✅ DB Sincronizada" : "1. Sincronizar Base de Datos"}
+              </Button>
+
+              <Button 
+                type="submit" 
+                className="w-full bg-red-600 hover:bg-red-700" 
+                disabled={isLoading || isSuccess || !dbSynced}
+              >
+                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isSuccess ? "✅ Admin Creado" : "2. Crear Usuario Admin"}
+              </Button>
+            </div>
 
             {isSuccess && (
               <div className="text-center text-sm text-red-600 font-medium">
